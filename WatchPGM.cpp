@@ -18,8 +18,16 @@ BITMAPINFO bmi;
 unsigned char *image = NULL;
 int w = 0, h = 0, maxval = 255;
 
+struct FileInfo
+{
+	TCHAR name[MAX_PATH];
+};
+
 FILE *f = NULL;
 char filename[MAX_PATH] = "";
+FileInfo *files = NULL;
+int num_files = 0;
+int current_file_number = 0;
 char last_filename[MAX_PATH] = "";
 struct _stat last_stat_buf;
 char text_buf[200];
@@ -75,8 +83,9 @@ LRESULT CALLBACK WndProc(
 		if ((stat_buf.st_mtime > last_stat_buf.st_mtime) ||
 			(strcmp(filename, last_filename) != 0))
 		{
-			// Reload updated file
+			// Load new file or reload updated file
 			LoadPGM(filename);
+			SetWindowText(hWnd, filename);
 			InvalidateRect(hWnd, NULL, FALSE);
 		}
 		
@@ -84,13 +93,43 @@ LRESULT CALLBACK WndProc(
 		
 	case WM_DROPFILES:
 	
+		num_files = DragQueryFile((HDROP)wParam, 0xFFFFFFFF, NULL, 0);
+		if (num_files == 0) break;
+		if (files) delete[] files;
+		files = new FileInfo[num_files];
+		for (int i=0 ; i < num_files ; ++i)
+		{
+			DragQueryFile((HDROP)wParam, i, files[i].name, MAX_PATH);
+		}
+		
+		// Display first file in bundle initially
+		current_file_number = 0;
+		strcpy(filename, files[current_file_number].name);
+		
 		// Get filename (first filename if several files were dropped)
-		DragQueryFile((HDROP)wParam, 0, filename, MAX_PATH );
+		//DragQueryFile((HDROP)wParam, 0, filename, MAX_PATH );
 		break;
 		
 	case WM_KEYDOWN:
 	
-		// Respond to a key stroke here
+		// Left and right arrow keys flick through
+		// the current set of images
+		if (wParam == 'q')
+		{
+			DestroyWindow(hWnd);
+		}
+		else if (wParam == VK_LEFT)
+		{
+			if (--current_file_number < 0)
+				current_file_number = num_files - 1;
+			strcpy(filename, files[current_file_number].name);
+		}
+		else if (wParam == VK_RIGHT)
+		{
+			if (++current_file_number >= num_files)
+				current_file_number = 0;
+			strcpy(filename, files[current_file_number].name);
+		}
 		break;
 		
 	case WM_CLOSE:
@@ -108,6 +147,13 @@ LRESULT CALLBACK WndProc(
 		{
 			delete[] image;
 			image = NULL;
+		}
+
+		// Delete filenames buffer
+		if (files)
+		{
+			delete[] files;
+			files = NULL;
 		}
 		
 		// Exit program
