@@ -1,10 +1,14 @@
 //
-// WatchPGM.cpp - A PGM viewer that reloads if file changes
-// Written by Ted Burke - last updated 27-11-2011
+// WatchPGM.cpp - A lightweight PGM image viewer
+// Written by Ted Burke - last updated 28-11-2011
+//
+// Copyright Ted Burke, 2011, All rights reserved.
+//
+// Website: http://batchloaf.wordpress.com
 //
 // To compile:
 //
-//		gcc -o WatchPGM.exe WatchPGM.cpp
+//		g++ -o WatchPGM.exe WatchPGM.cpp -lgdi32
 //
 
 // Standard Windows header file for all Win32 programs
@@ -30,7 +34,7 @@ int num_files = 0;
 int current_file_number = 0;
 char last_filename[MAX_PATH] = "";
 struct _stat last_stat_buf;
-char text_buf[200];
+char text_buf[2*MAX_PATH];
 
 // ID for background timer
 UINT_PTR timer;
@@ -85,7 +89,8 @@ LRESULT CALLBACK WndProc(
 		{
 			// Load new file or reload updated file
 			LoadPGM(filename);
-			SetWindowText(hWnd, filename);
+			sprintf(text_buf, "WatchPGM %s", filename);
+			SetWindowText(hWnd, text_buf);
 			InvalidateRect(hWnd, NULL, FALSE);
 		}
 		
@@ -93,42 +98,47 @@ LRESULT CALLBACK WndProc(
 		
 	case WM_DROPFILES:
 	
+		// Find out how many files were dropped
 		num_files = DragQueryFile((HDROP)wParam, 0xFFFFFFFF, NULL, 0);
 		if (num_files == 0) break;
+		
+		// Reallocate file info array for correct number of files
 		if (files) delete[] files;
 		files = new FileInfo[num_files];
-		for (int i=0 ; i < num_files ; ++i)
-		{
-			DragQueryFile((HDROP)wParam, i, files[i].name, MAX_PATH);
-		}
 		
-		// Display first file in bundle initially
+		// Copy all filenames into the file info array
+		for (int i=0 ; i < num_files ; ++i)
+			DragQueryFile((HDROP)wParam, i, files[i].name, MAX_PATH);
+		
+		// Display first file in set initially
 		current_file_number = 0;
 		strcpy(filename, files[current_file_number].name);
 		
-		// Get filename (first filename if several files were dropped)
-		//DragQueryFile((HDROP)wParam, 0, filename, MAX_PATH );
 		break;
 		
 	case WM_KEYDOWN:
 	
-		// Left and right arrow keys flick through
-		// the current set of images
-		if (wParam == 'q')
+		// Process keypress
+		if (wParam == 'Q')
 		{
+			// Q key quits WatchPGM
 			DestroyWindow(hWnd);
 		}
-		else if (wParam == VK_LEFT)
+		else if (wParam == VK_LEFT || wParam == VK_DOWN)
 		{
+			// Left (or down) arrow key selects previous image in set
 			if (--current_file_number < 0)
 				current_file_number = num_files - 1;
-			strcpy(filename, files[current_file_number].name);
+			if (num_files > 0)
+				strcpy(filename, files[current_file_number].name);
 		}
-		else if (wParam == VK_RIGHT)
+		else if (wParam == VK_RIGHT || wParam == VK_UP)
 		{
+			// Right (or up) arrow key selects next image in set
 			if (++current_file_number >= num_files)
 				current_file_number = 0;
-			strcpy(filename, files[current_file_number].name);
+			if (num_files > 0)
+				strcpy(filename, files[current_file_number].name);
 		}
 		break;
 		
@@ -149,7 +159,7 @@ LRESULT CALLBACK WndProc(
 			image = NULL;
 		}
 
-		// Delete filenames buffer
+		// Delete file info array
 		if (files)
 		{
 			delete[] files;
@@ -234,7 +244,7 @@ void LoadPGM(const char *filename)
 	}
 	
 	// Load bitmap data from file
-	fprintf(stderr, "Loading image file %s...", filename);
+	fprintf(stderr, "Loading file %s...", filename);
 	f = fopen(filename, "r");
 	if (!f) fprintf(stderr, "Error\n");
 	
@@ -262,6 +272,7 @@ void LoadPGM(const char *filename)
 	
 	// Close file
 	fclose(f);
+	fprintf(stderr, "OK\n");
 
 	// Fill bitmap info structure
 	bmi.bmiHeader.biSize = sizeof(BITMAPINFO);
@@ -281,9 +292,6 @@ void LoadPGM(const char *filename)
 
 	// Remember modification time of file
 	struct _stat stat_buf;
-	int result;
-	result = _stat(filename, &stat_buf);
-	last_stat_buf = stat_buf;
-	
-	fprintf(stderr, "Done\n");
+	int result = _stat(filename, &stat_buf);
+	last_stat_buf = stat_buf;	
 }
