@@ -24,11 +24,12 @@ int w = 0, h = 0, maxval = 255;
 
 struct FileInfo
 {
-	TCHAR name[MAX_PATH];
+	TCHAR name[MAX_PATH]; // filename
 };
 
 FILE *f = NULL;
 char filename[MAX_PATH] = "";
+int file_error = 0;
 FileInfo *files = NULL;
 int num_files = 0;
 int current_file_number = 0;
@@ -41,7 +42,7 @@ UINT_PTR timer;
 const int file_check_interval = 100; // Check every 100ms
 
 // Function prototype
-void LoadPGM(const char *);
+int LoadPGM(const char *);
 
 // This is the application's message handler
 LRESULT CALLBACK WndProc(
@@ -55,8 +56,7 @@ LRESULT CALLBACK WndProc(
 		// Start background timer
 		timer = SetTimer(hWnd, 0, file_check_interval, NULL);
 		
-		// Register that files can be dropped into
-		// this window
+		// Allow files to be dropped into this window
 		DragAcceptFiles(hWnd, TRUE);
 		
 		break;
@@ -81,14 +81,24 @@ LRESULT CALLBACK WndProc(
 		// Check to see if file has been updated or
 		// filename has changed
 		struct _stat stat_buf;
-		int result;
-		if (strcmp(filename, "") == 0) break;
-		result = _stat(filename, &stat_buf);
-		if ((stat_buf.st_mtime > last_stat_buf.st_mtime) ||
-			(strcmp(filename, last_filename) != 0))
+		int result = _stat(filename, &stat_buf);
+		
+		if ((file_error == 0) &&
+			(strlen(filename) > 0) &&
+			((stat_buf.st_mtime > last_stat_buf.st_mtime) ||
+				(strcmp(filename, last_filename) != 0)))
 		{
 			// Load new file or reload updated file
-			LoadPGM(filename);
+			fprintf(stderr, "Loading %s...", filename);
+			if (LoadPGM(filename) == 0) printf("OK\n");
+			else
+			{
+				file_error = 1;
+				fprintf(stderr, "ERROR\n");
+				sprintf(text_buf, "Invalid PGM file: %s", filename);
+				MessageBox(NULL, text_buf, "Error", 0);
+				InvalidateRect(hWnd, NULL, TRUE);
+			}
 			sprintf(text_buf, "WatchPGM %s", filename);
 			SetWindowText(hWnd, text_buf);
 			InvalidateRect(hWnd, NULL, FALSE);
@@ -112,7 +122,8 @@ LRESULT CALLBACK WndProc(
 		
 		// Display first file in set initially
 		current_file_number = 0;
-		strcpy(filename, files[current_file_number].name);
+		strncpy(filename, files[current_file_number].name, MAX_PATH);
+		file_error = 0;
 		
 		break;
 		
@@ -130,7 +141,8 @@ LRESULT CALLBACK WndProc(
 			if (--current_file_number < 0)
 				current_file_number = num_files - 1;
 			if (num_files > 0)
-				strcpy(filename, files[current_file_number].name);
+				strncpy(filename, files[current_file_number].name, MAX_PATH);
+			file_error = 0;
 		}
 		else if (wParam == VK_RIGHT || wParam == VK_UP)
 		{
@@ -138,7 +150,8 @@ LRESULT CALLBACK WndProc(
 			if (++current_file_number >= num_files)
 				current_file_number = 0;
 			if (num_files > 0)
-				strcpy(filename, files[current_file_number].name);
+				strncpy(filename, files[current_file_number].name, MAX_PATH);
+			file_error = 0;
 		}
 		break;
 		
@@ -226,38 +239,63 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 }
 
 // Load or reload a PGMimage file into memory
-void LoadPGM(const char *filename)
+int LoadPGM(const char *filename)
 {
-	// Nasty hack to check if file is currently open
-	// in another program. There had been a problem
-	// without this because WatchPGM was already trying
-	// to reload the file before the modifying program
-	// had finished writing it, causing a corrupted
-	// image to be loaded.
-	if (rename(filename, filename) != 0) return;
-
 	// Deallocate pixel buffer
+	//fprintf(stderr, "deallocating pixel buffer\n");
 	if (image != NULL)
 	{
 		delete[] image;
 		image = NULL;
 	}
 	
+	// Nasty hack to check if file is currently open
+	// in another program. There had been a problem
+	// without this because WatchPGM was already trying
+	// to reload the file before the modifying program
+	// had finished writing it, causing a corrupted
+	// image to be loaded.
+	//fprintf(stderr, "Trying to rename file %s\n", filename);
+	if (rename(filename, filename) != 0) return 1;
+
 	// Load bitmap data from file
-	fprintf(stderr, "Loading file %s...", filename);
-	f = fopen(filename, "r");
-	if (!f) fprintf(stderr, "Error\n");
+	//fprintf(stderr, "Opening file\n");
+	if ((f = fopen(filename, "r")) == NULL)
+	{
+		return 1;
+	}
 	
 	// Read file header
+	
+	// Read and check the "P2" line
+	//fprintf(stderr, "Reading file header\n");
+	fgets(text_buf, 2*MAX_PATH, f);
+	//fscanf(f, "%[^\n]\n", text_buf);
+	
+	if ((text_buf[0] != 'P') || (text_buf[1] != '2'))
+	{
+		// Doesn't seem to be a PGM file
+		fclose(f);
+		return 1;
+	}
+	
+	// Read lines until we get to one that's not a comment (or blank)
+	do
+	{
+		fscanf(f, "%[^\n]\n", text_buf);
+	}
+	while((!strlen(text_buf)) || text_buf[0] == '#');
+
+	// Read width, height and maximum pixel value
+	sscanf(text_buf, "%d %d", &w, &h);
 	fscanf(f, "%[^\n]\n", text_buf);
-	fscanf(f, "%[^\n]\n", text_buf);
-	fscanf(f, "%d %d\n", &w, &h);
-	fscanf(f, "%d\n", &maxval);
+	sscanf(text_buf, "%d", &maxval);
 	
 	// Allocate pixel buffer
 	image = new unsigned char[3*w*h];
 	
 	// Read pixel data from file
+	//fprintf(stderr, "Reading pixel data\n");
 	int n;
 	for (int y=h-1 ; y>=0 ; --y)
 	{
@@ -271,10 +309,11 @@ void LoadPGM(const char *filename)
 	}
 	
 	// Close file
+	//fprintf(stderr, "Closing file\n");
 	fclose(f);
-	fprintf(stderr, "OK\n");
 
 	// Fill bitmap info structure
+	//fprintf(stderr, "Create bitmap structure\n");
 	bmi.bmiHeader.biSize = sizeof(BITMAPINFO);
 	bmi.bmiHeader.biWidth = w;
 	bmi.bmiHeader.biHeight = h;
@@ -288,10 +327,13 @@ void LoadPGM(const char *filename)
 	bmi.bmiHeader.biClrImportant = 0;
 
 	// Remember the name of the file that was loaded
-	strcpy(last_filename, filename);
+	strncpy(last_filename, filename, MAX_PATH);
 
 	// Remember modification time of file
 	struct _stat stat_buf;
 	int result = _stat(filename, &stat_buf);
-	last_stat_buf = stat_buf;	
+	last_stat_buf = stat_buf;
+	
+	//fprintf(stderr, "Return zero\n");
+	return 0;
 }
