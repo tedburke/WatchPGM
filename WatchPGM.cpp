@@ -8,6 +8,11 @@
 //
 // To compile:
 //
+//		g++ -o WatchPGM.exe WatchPGM.cpp -mwindows -lgdi32
+//
+// Alternatively, to compile as a console app (for example,
+// to display all the printf messages etc):
+//
 //		g++ -o WatchPGM.exe WatchPGM.cpp -lgdi32
 //
 
@@ -17,24 +22,42 @@
 #include <sys/stat.h>
 #include <stdio.h>
 
+#define WINDOW_WIDTH 400
+#define WINDOW_HEIGHT 300
+
+
 // Handle for image bitmap 
 BITMAPINFO bmi;
 unsigned char *image = NULL;
 int w = 0, h = 0, maxval = 255;
 
+// An array of these structures is used to store
+// the names of multiple files that are dropped
+// into the WatchPGM window in one go.
 struct FileInfo
 {
 	TCHAR name[MAX_PATH]; // filename
 };
 
+// Current file properties
 FILE *f = NULL;
 char filename[MAX_PATH] = "";
 int file_error = 0;
+
+// Properties of the currently selected file set
+// (only one file is actually loaded at a time,
+// but the user can rapidly switch between the
+// set of selected files using the arrow keys)
 FileInfo *files = NULL;
 int num_files = 0;
 int current_file_number = 0;
+
+// Used to detect when the displayed image
+// needs to be updated
 char last_filename[MAX_PATH] = "";
 struct _stat last_stat_buf;
+
+// This buffer is used for various string manipulations
 char text_buf[2*MAX_PATH];
 
 // ID for background timer
@@ -220,7 +243,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 		"WatchPGM",
 		WS_OVERLAPPEDWINDOW,
 		CW_USEDEFAULT, CW_USEDEFAULT,
-		800, 600,
+		WINDOW_WIDTH, WINDOW_HEIGHT,
 		NULL, NULL,
 		hInstance, NULL);
 		
@@ -279,13 +302,13 @@ int LoadPGM(const char *filename)
 		return 1;
 	}
 	
-	// Read lines until we get to one that's not a comment (or blank)
-	do
-	{
-		fscanf(f, "%[^\n]\n", text_buf);
-	}
-	while((!strlen(text_buf)) || text_buf[0] == '#');
-
+	// Read lines until we get to one that is neither
+	// a comment nor blank
+	char short_buf[2];
+	do fgets(text_buf, 2*MAX_PATH, f);
+	while((sscanf(text_buf, "%1s", short_buf) != 1) ||
+			(short_buf[0] == '#'));
+	
 	// Read width, height and maximum pixel value
 	sscanf(text_buf, "%d %d", &w, &h);
 	fscanf(f, "%[^\n]\n", text_buf);
